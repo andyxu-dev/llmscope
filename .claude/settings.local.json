@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3.12 -m pytest --version)",
+      "Bash(python3.12 -m pip list)",
+      "Bash(uv venv *)",
+      "Bash(uv pip *)"
+    ]
+  }
+}
