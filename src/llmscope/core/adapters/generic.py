@@ -25,10 +25,16 @@ class GenericAdapter(ArchitectureAdapter):
             return {"architecture": "unknown"}
         return {
             "architecture": getattr(cfg, "model_type", "unknown"),
-            "num_layers": int(getattr(cfg, "num_hidden_layers", getattr(cfg, "n_layer", 0))),
-            "num_heads": int(getattr(cfg, "num_attention_heads", getattr(cfg, "n_head", 0))),
+            "num_layers": int(
+                getattr(cfg, "num_hidden_layers", getattr(cfg, "n_layer", 0))
+            ),
+            "num_heads": int(
+                getattr(cfg, "num_attention_heads", getattr(cfg, "n_head", 0))
+            ),
             "hidden_dim": int(getattr(cfg, "hidden_size", getattr(cfg, "n_embd", 0))),
             "num_kv_heads": int(
-                getattr(cfg, "num_key_value_heads", getattr(cfg, "num_attention_heads", 0))
+                getattr(
+                    cfg, "num_key_value_heads", getattr(cfg, "num_attention_heads", 0)
+                )
             ),
         }

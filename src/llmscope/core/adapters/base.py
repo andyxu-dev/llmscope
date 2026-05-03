@@ -7,12 +7,12 @@ from typing import Any
 
 import torch.nn as nn
 
-
 PastKeyValues = tuple[tuple[Any, Any], ...]
 
 
 class ArchitectureAdapter(ABC):
-    """Encapsulates architecture-specific details for hook attachment and KV extraction."""
+    """Encapsulates architecture-specific details for hook attachment and KV extraction.
+    """
 
     @abstractmethod
     def get_hook_module(self, model: nn.Module) -> nn.Module:
@@ -24,7 +24,7 @@ class ArchitectureAdapter(ABC):
 
     @abstractmethod
     def get_model_info(self, model: nn.Module) -> dict[str, Any]:
-        """Return model config metadata: num_layers, num_heads, hidden_dim, num_kv_heads."""
+        """Return model metadata: num_layers, num_heads, hidden_dim, num_kv_heads."""
 
 
 def normalize_past_key_values(raw: Any) -> PastKeyValues | None:

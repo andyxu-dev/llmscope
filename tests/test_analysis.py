@@ -7,17 +7,16 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, List
+from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
 import torch
 import torch.nn as nn
-import pytest
 
 from llmscope.analysis.kv_cache import KVCacheAnalyzer
 from llmscope.analysis.memory import MemoryProfiler
 from llmscope.core.events import KVCacheSnapshot, LayerKVStats
-
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -50,7 +49,7 @@ def _make_layer_stats(
 
 def _make_snapshot(step: int, tokens: int, **layer_kwargs: float) -> KVCacheSnapshot:
     layers = [_make_layer_stats(i, tokens, **layer_kwargs) for i in range(2)]
-    total = sum(l.k_bytes + l.v_bytes for l in layers)
+    total = sum(layer.k_bytes + layer.v_bytes for layer in layers)
     return KVCacheSnapshot(
         session_id="test",
         timestamp=datetime.now(tz=timezone.utc),
@@ -242,6 +241,7 @@ def test_dashboard_helpers_tolerate_missing_fields() -> None:
 def test_dashboard_no_streamlit_raises() -> None:
     """ImportError with helpful message when streamlit is absent."""
     from transformers import GPT2Config, GPT2LMHeadModel  # type: ignore[import-untyped]
+
     from llmscope import Tracer
 
     cfg = GPT2Config(
@@ -270,6 +270,7 @@ def test_dashboard_no_streamlit_raises() -> None:
 def test_dashboard_launches_popen() -> None:
     """dashboard() writes a JSONL file and calls subprocess.Popen with streamlit run."""
     from transformers import GPT2Config, GPT2LMHeadModel  # type: ignore[import-untyped]
+
     from llmscope import Tracer
 
     cfg = GPT2Config(

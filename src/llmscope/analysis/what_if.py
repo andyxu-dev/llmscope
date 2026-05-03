@@ -101,14 +101,17 @@ class WhatIfEstimator:
         """
         per_layer = getattr(snapshot, "per_layer", None)
         if not per_layer:
-            raise ValueError("snapshot.per_layer is empty — cannot derive model dimensions")
+            raise ValueError(
+                "snapshot.per_layer is empty — cannot derive model dimensions"
+            )
 
         num_layers = len(per_layer)
         first = per_layer[0]
         k_shape = getattr(first, "k_shape", None)
         if k_shape is None or len(k_shape) < 4:
             raise ValueError(
-                f"Expected k_shape with 4 dims (batch, heads, seq, head_dim), got: {k_shape}"
+                "Expected k_shape with 4 dims (batch, heads, seq, head_dim),"
+                f" got: {k_shape}"
             )
         num_heads = int(k_shape[1])
         head_dim = int(k_shape[3])

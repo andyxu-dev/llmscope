@@ -159,7 +159,9 @@ class AttentionPattern(Event):
     @classmethod
     def _validate_topk(cls, value: List[int]) -> List[int]:
         if any(item < 0 for item in value):
-            raise ValueError("top_k_attended_indices must contain non-negative integers")
+            raise ValueError(
+                "top_k_attended_indices must contain non-negative integers"
+            )
         return value
 
     @field_validator("attention_weights_summary")
@@ -171,7 +173,9 @@ class AttentionPattern(Event):
             raise ValueError("attention_weights_summary must be at most 64x64")
         row_length = len(value[0])
         if row_length == 0 or any(len(row) != row_length for row in value):
-            raise ValueError("attention_weights_summary rows must be non-empty and equal length")
+            raise ValueError(
+                "attention_weights_summary rows must be non-empty and equal length"
+            )
         return value
 
 

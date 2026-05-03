@@ -2,24 +2,30 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 
 from llmscope.analysis.what_if import (
+    _BYTES_PER_ELEMENT,
     WhatIfEstimator,
     estimate_kv_memory,
-    _BYTES_PER_ELEMENT,
 )
 from llmscope.core.events import KVCacheSnapshot, LayerKVStats
-from datetime import datetime, timezone
-
 
 # ── shared fixtures ────────────────────────────────────────────────────────────
 
-def _estimator(num_layers: int = 4, num_heads: int = 8, head_dim: int = 64) -> WhatIfEstimator:
-    return WhatIfEstimator(num_layers=num_layers, num_heads=num_heads, head_dim=head_dim)
+def _estimator(
+    num_layers: int = 4, num_heads: int = 8, head_dim: int = 64
+) -> WhatIfEstimator:
+    return WhatIfEstimator(
+        num_layers=num_layers, num_heads=num_heads, head_dim=head_dim
+    )
 
 
-def _make_snapshot(num_layers: int = 4, num_heads: int = 8, head_dim: int = 64, seq: int = 10) -> KVCacheSnapshot:
+def _make_snapshot(
+    num_layers: int = 4, num_heads: int = 8, head_dim: int = 64, seq: int = 10
+) -> KVCacheSnapshot:
     shape = (1, num_heads, seq, head_dim)
     nbytes = num_heads * seq * head_dim * 2  # fp16
     layers = [
@@ -36,7 +42,7 @@ def _make_snapshot(num_layers: int = 4, num_heads: int = 8, head_dim: int = 64, 
         )
         for i in range(num_layers)
     ]
-    total = sum(l.k_bytes + l.v_bytes for l in layers)
+    total = sum(layer.k_bytes + layer.v_bytes for layer in layers)
     return KVCacheSnapshot(
         session_id="test",
         timestamp=datetime.now(tz=timezone.utc),

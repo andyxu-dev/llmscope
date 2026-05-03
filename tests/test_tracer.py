@@ -8,7 +8,9 @@ from llmscope import Config, Tracer
 
 
 def _tiny_gpt2() -> GPT2LMHeadModel:
-    cfg = GPT2Config(n_layer=2, n_head=2, n_embd=64, vocab_size=100, n_positions=64, n_ctx=64)
+    cfg = GPT2Config(
+        n_layer=2, n_head=2, n_embd=64, vocab_size=100, n_positions=64, n_ctx=64
+    )
     return GPT2LMHeadModel(cfg)
 
 

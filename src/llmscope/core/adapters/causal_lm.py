@@ -44,6 +44,8 @@ class CausalLMAdapter(ArchitectureAdapter):
             "hidden_dim": int(getattr(cfg, "hidden_size", 0)),
             # Llama/Mistral may use GQA; fall back to num_attention_heads.
             "num_kv_heads": int(
-                getattr(cfg, "num_key_value_heads", getattr(cfg, "num_attention_heads", 0))
+                getattr(
+                    cfg, "num_key_value_heads", getattr(cfg, "num_attention_heads", 0)
+                )
             ),
         }
