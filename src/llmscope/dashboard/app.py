@@ -195,6 +195,7 @@ def main() -> None:
 def _render_what_if(latest_kv: dict[str, Any]) -> None:
     """Show estimated KV cache memory for fp16/int8/int4 at the current seq length."""
     import streamlit as st
+
     from llmscope.analysis.what_if import WhatIfEstimator
 
     per_layer = latest_kv.get("per_layer", [])

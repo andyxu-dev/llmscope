@@ -7,18 +7,16 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import MagicMock
 
 import torch
 import torch.nn as nn
 
 from llmscope.core.adapters import (
     CausalLMAdapter,
-    GPT2Adapter,
     GenericAdapter,
+    GPT2Adapter,
     get_adapter,
 )
-
 
 # ── minimal fake model helpers ────────────────────────────────────────────────
 

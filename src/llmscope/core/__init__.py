@@ -1,6 +1,6 @@
 """Core tracing and hook primitives for llmscope."""
 
-from .adapters import ArchitectureAdapter, GPT2Adapter, GenericAdapter, get_adapter
+from .adapters import ArchitectureAdapter, GenericAdapter, GPT2Adapter, get_adapter
 from .config import Config
 from .events import (
     AttentionPattern,
