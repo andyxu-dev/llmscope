@@ -21,11 +21,11 @@ class GPT2Adapter(ArchitectureAdapter):
         return normalize_past_key_values(raw)
 
     def get_model_info(self, model: nn.Module) -> dict[str, Any]:
-        cfg = model.config  # type: ignore[union-attr]
+        cfg = getattr(model, "config", None)
         return {
             "architecture": "gpt2",
-            "num_layers": int(cfg.n_layer),
-            "num_heads": int(cfg.n_head),
-            "hidden_dim": int(cfg.n_embd),
-            "num_kv_heads": int(cfg.n_head),  # GPT-2 has no GQA
+            "num_layers": int(getattr(cfg, "n_layer", 0)),
+            "num_heads": int(getattr(cfg, "n_head", 0)),
+            "hidden_dim": int(getattr(cfg, "n_embd", 0)),
+            "num_kv_heads": int(getattr(cfg, "n_head", 0)),
         }

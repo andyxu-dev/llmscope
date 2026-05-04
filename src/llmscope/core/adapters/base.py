@@ -38,7 +38,7 @@ def normalize_past_key_values(raw: Any) -> PastKeyValues | None:
     if raw is None:
         return None
     if isinstance(raw, tuple):
-        return raw  # type: ignore[return-value]
+        return raw
 
     # transformers 4.36–4.x: DynamicCache.key_cache / .value_cache
     key_cache: Any = getattr(raw, "key_cache", None)

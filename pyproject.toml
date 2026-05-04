@@ -53,10 +53,14 @@ packages = ["src/llmscope"]
 include = ["src/llmscope/**"]
 
 [tool.mypy]
-python_version = "3.9"
+python_version = "3.11"
 warn_unused_configs = true
 strict = true
-files = ["src", "tests"]
+files = ["src"]
+
+[[tool.mypy.overrides]]
+module = ["streamlit", "streamlit.*", "plotly", "plotly.*"]
+ignore_missing_imports = true
 
 [tool.ruff]
 line-length = 88

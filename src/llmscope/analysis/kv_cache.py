@@ -82,6 +82,8 @@ def _compute_outlier_risk(snapshot: KVCacheSnapshot) -> tuple[str, str]:
     for layer in snapshot.per_layer:
         k_max = getattr(layer, "k_max", None)
         k_std = getattr(layer, "k_std", None)
+        if k_max is None or k_std is None:
+            continue
         try:
             k_max_float = float(k_max)
             k_std_float = float(k_std)

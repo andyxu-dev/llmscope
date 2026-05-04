@@ -23,7 +23,7 @@ class CausalLMAdapter(ArchitectureAdapter):
     """
 
     def get_hook_module(self, model: nn.Module) -> nn.Module:
-        backbone = getattr(model, "model", None)
+        backbone: nn.Module | None = getattr(model, "model", None)
         if backbone is None or not isinstance(backbone, nn.Module):
             # Graceful fallback: hook the wrapper itself.
             return model

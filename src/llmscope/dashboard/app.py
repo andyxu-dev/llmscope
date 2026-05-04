@@ -117,8 +117,7 @@ def main() -> None:
     # ── KV growth chart ────────────────────────────────────────────────────────
     st.subheader("KV Cache Growth")
     if kv_events:
-        import plotly.graph_objects as go  # type: ignore[import-untyped]
-
+        import plotly.graph_objects as go
         steps = [e.get("step_index", i) for i, e in enumerate(kv_events)]
         bytes_mb = [_number(e.get("total_bytes")) / 1e6 for e in kv_events]
 
@@ -141,8 +140,7 @@ def main() -> None:
     if kv_events:
         per_layer = kv_events[-1].get("per_layer", [])
         if per_layer:
-            import plotly.graph_objects as go  # type: ignore[import-untyped]
-
+            import plotly.graph_objects as go
             layer_indices, k_bytes_mb, v_bytes_mb = _layer_breakdown_series(per_layer)
 
             if layer_indices:
