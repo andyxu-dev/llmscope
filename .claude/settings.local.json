@@ -4,7 +4,16 @@
       "Bash(python3.12 -m pytest --version)",
       "Bash(python3.12 -m pip list)",
       "Bash(uv venv *)",
-      "Bash(uv pip *)"
+      "Bash(uv pip *)",
+      "Bash(.venv/bin/pip install *)",
+      "Bash(.venv/bin/python -m mypy src tests)",
+      "Bash(.venv/bin/python -m ruff check src tests)",
+      "Bash(.venv/bin/python -m ruff check --fix src/llmscope/dashboard/app.py)",
+      "Bash(.venv/bin/python -m ruff check src tests examples)",
+      "Bash(.venv/bin/python -m pytest --tb=short -q)",
+      "Bash(.venv/bin/python -m mypy src)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }
