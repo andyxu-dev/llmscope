@@ -103,6 +103,18 @@ Requires Python ≥ 3.9, PyTorch ≥ 2.0, transformers ≥ 4.35.
 
 ---
 
+## Run the demo
+
+No model download required — uses a tiny random-weight GPT-2:
+
+```bash
+python examples/demo.py
+```
+
+This generates a trace, prints a summary, saves `examples/demo_trace.jsonl`, and prints the exact command to open the Streamlit dashboard.
+
+---
+
 ## Config options
 
 ```python
