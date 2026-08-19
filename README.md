@@ -162,18 +162,6 @@ profile = MemoryProfiler().profile(model, latest_snapshot=tracer.kv_snapshots[-1
 
 ---
 
-## What's implemented (Week 2 of 4)
-
-- `Tracer` — context manager + explicit start/stop, idempotent, ring buffer
-- `Config` — sampling rate, buffer size
-- `GPT2Adapter` — production-ready for GPT-2 family
-- `GenericAdapter` — fallback for unsupported architectures
-- `KVCacheSnapshot` — per-step, per-layer shape / byte / float stats
-- `JSONL export` — `tracer.save(path)`
-- `KVCacheAnalyzer` — growth curve, per-layer breakdown, outlier risk flag
-- `MemoryProfiler` — weights/KV/activations breakdown, CPU-safe
-- Streamlit dashboard — launched via `tracer.dashboard()`
-- 34 tests, 76% overall coverage, CI on Python 3.9–3.11
 
 ## Roadmap
 
