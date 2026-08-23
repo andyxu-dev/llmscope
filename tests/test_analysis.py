@@ -16,7 +16,7 @@ import torch.nn as nn
 
 from llmscope.analysis.kv_cache import KVCacheAnalyzer
 from llmscope.analysis.memory import MemoryProfiler
-from llmscope.core.events import KVCacheSnapshot, LayerKVStats
+from llmscope.core.events import KVCacheSnapshot, LayerKVStats, MemoryEvent
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -195,27 +195,27 @@ def test_memory_profiler_mb_helpers() -> None:
 # ── tracer.dashboard() ────────────────────────────────────────────────────────
 
 
-def test_dashboard_load_jsonl_skips_malformed_lines(tmp_path: Path) -> None:
+def test_dashboard_load_jsonl_uses_trace_session_loader(tmp_path: Path) -> None:
     from llmscope.dashboard.app import _load_jsonl
 
     trace_path = tmp_path / "trace.jsonl"
-    trace_path.write_text(
-        "\n".join(
-            [
-                json.dumps({"event_type": "kv_cache_snapshot", "total_bytes": 10}),
-                "{not json",
-                "[]",
-                json.dumps({"event_type": "memory_event", "breakdown": {}}),
-                json.dumps({"event_type": "unknown"}),
-            ]
-        ),
-        encoding="utf-8",
+    snapshot = _make_snapshot(0, 5)
+    memory = MemoryEvent(
+        session_id=snapshot.session_id,
+        timestamp=snapshot.timestamp,
+        allocated_bytes=0,
+        reserved_bytes=0,
+        peak_allocated_bytes=0,
+        breakdown={"weights": 512, "kv_cache": snapshot.total_bytes, "activations": 0},
     )
+    trace_path.write_text(snapshot.to_jsonl() + memory.to_jsonl(), encoding="utf-8")
 
     kv_events, mem_events = _load_jsonl(trace_path)
 
     assert len(kv_events) == 1
     assert len(mem_events) == 1
+    assert kv_events[0]["total_bytes"] == snapshot.total_bytes
+    assert mem_events[0]["breakdown"]["kv_cache"] == snapshot.total_bytes
 
 
 def test_dashboard_helpers_tolerate_missing_fields() -> None:

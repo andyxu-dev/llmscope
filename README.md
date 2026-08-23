@@ -6,7 +6,7 @@
 
 **LLMscope is a Python tracing and visualization tool for inspecting KV-cache growth and coarse memory attribution during Hugging Face causal language model inference.**
 
-It is built for a narrow debugging/profiling workflow: run `model.generate()` under a tracer, capture per-step KV-cache snapshots, save those snapshots as JSONL, and inspect growth patterns in a Streamlit dashboard or Python analysis helpers.
+It is built for a narrow debugging/profiling workflow: run `model.generate()` under a tracer, capture per-step KV-cache snapshots, save those snapshots as JSONL, and inspect current or historical growth patterns in a Streamlit dashboard or Python analysis helpers.
 
 ![LLMscope dashboard overview](assets/dashboard-overview.png)
 
@@ -19,6 +19,7 @@ Dashboard overview from the bundled tiny GPT-2 CPU demo. The demo is intentional
 - Records per-layer key/value tensor shapes, dtypes, byte counts, and simple float statistics.
 - Records CUDA allocator memory when CUDA is available; on CPU, memory allocation metrics are reported as unavailable.
 - Saves captured KV snapshots and memory events to newline-delimited JSON.
+- Loads saved JSONL traces as typed, read-only trace sessions for offline analysis.
 - Provides analyzers for KV growth, per-layer byte breakdown, outlier-risk heuristics, and analytical KV memory what-if estimates.
 - Provides a Streamlit dashboard that reads a JSONL trace directly.
 
@@ -36,8 +37,10 @@ flowchart LR
     D --> E["KVCacheSnapshot + MemoryEvent"]
     E --> F["In-memory ring buffer"]
     F --> G["JSONL trace via tracer.save()"]
-    G --> H["Streamlit dashboard"]
-    F --> I["Python analyzers"]
+    G --> H["TraceSession.load()"]
+    H --> I["Streamlit dashboard"]
+    F --> J["Python analyzers"]
+    H --> J
 ```
 
 This is not a traditional frontend/backend web app. The main system is a Python instrumentation and analysis library. Streamlit is the presentation layer and imports the analysis code directly. A small FastAPI app exists, but only `/api/health` is implemented; the trace endpoint is a placeholder.
@@ -50,6 +53,7 @@ This is not a traditional frontend/backend web app. The main system is a Python 
 | GPT-2-family tracing | Implemented and tested | Uses `GPT2Adapter` and tiny random GPT-2 tests. |
 | Llama/Mistral/Qwen2-style adapter | Partial | Adapter exists and is unit-tested with fake modules, not real checkpoints. |
 | JSONL export | Implemented and tested | `tracer.save(path)` writes snapshots and memory events. |
+| JSONL load | Implemented and tested | `TraceSession.load(path)` reconstructs typed snapshots and memory events without a model. |
 | Streamlit dashboard | Implemented | Reads JSONL from `LLMSCOPE_TRACE_PATH`; helper logic is tested. |
 | What-if KV estimator | Implemented and tested | Analytical estimate only; it does not quantize a model. |
 | FastAPI backend | Placeholder | Health check works; trace creation returns 501. |
@@ -73,6 +77,16 @@ with Tracer(model) as tracer:
 
 print(tracer.summary())
 tracer.save("examples/demo_trace.jsonl")
+```
+
+Historical traces can be loaded without rerunning model inference:
+
+```python
+from llmscope import TraceSession
+from llmscope.analysis import KVCacheAnalyzer
+
+trace = TraceSession.load("examples/demo_trace.jsonl")
+result = KVCacheAnalyzer().analyze(trace.kv_snapshots)
 ```
 
 ## Dashboard
@@ -129,12 +143,12 @@ Memory : N/A (CPU mode - no CUDA allocator)
 Verified locally on Python 3.11.14:
 
 ```bash
-python -m ruff check src tests
+python -m ruff check src tests examples
 python -m mypy src
-python -m pytest
+python -m pytest -q
 ```
 
-Current result: 83 tests pass with 82% total coverage.
+Current result: 92 tests pass with 82% total coverage.
 
 ## Current Limitations
 
@@ -144,12 +158,12 @@ Current result: 83 tests pass with 82% total coverage.
 - What-if precision analysis is analytical only; it does not run quantized inference.
 - Real Llama/Mistral/Qwen2 checkpoint tracing is not covered by tests in this repo.
 - Streamlit is the main UI; there is no production backend or real-time streaming API.
-- `Tracer.load()`, `Tracer.serve()`, attention-weight capture, and the `/api/trace` endpoint are not implemented.
+- `Tracer.load()` is intentionally not part of the live tracer API; use `TraceSession.load()` for saved JSONL traces.
+- `Tracer.serve()`, attention-weight capture, and the `/api/trace` endpoint are not implemented.
 
 ## Roadmap
 
 - Add real-checkpoint adapter validation for Llama, Mistral, Qwen2, and related grouped-query attention models.
-- Implement replay/loading for JSONL traces.
 - Add a safer CLI for running demos and launching the dashboard.
 - Decide whether to rename the package or publish under a non-conflicting PyPI name.
 - Expand dashboard test coverage with a browser-level smoke test.

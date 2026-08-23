@@ -15,6 +15,7 @@ from .events import (
     trace_event_adapter,
 )
 from .hooks import HookManager
+from .trace_session import TraceLoadError, TraceSession
 from .tracer import Tracer
 
 __all__ = [
@@ -34,5 +35,7 @@ __all__ = [
     "TraceEvent",
     "trace_event_adapter",
     "HookManager",
+    "TraceLoadError",
+    "TraceSession",
     "Tracer",
 ]

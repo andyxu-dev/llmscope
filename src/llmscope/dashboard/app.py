@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import os
 from pathlib import Path
 from typing import Any, Optional
+
+from llmscope import TraceLoadError, TraceSession
 
 # Allow running as `streamlit run app.py --` with LLMSCOPE_TRACE_PATH env var
 TRACE_PATH_ENV = "LLMSCOPE_TRACE_PATH"
@@ -13,24 +14,9 @@ TRACE_PATH_ENV = "LLMSCOPE_TRACE_PATH"
 
 def _load_jsonl(path: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Return (kv_snapshots_dicts, memory_event_dicts) from a JSONL file."""
-    kv: list[dict[str, Any]] = []
-    mem: list[dict[str, Any]] = []
-    with path.open(encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if not isinstance(obj, dict):
-                continue
-            et = obj.get("event_type")
-            if et == "kv_cache_snapshot":
-                kv.append(obj)
-            elif et == "memory_event":
-                mem.append(obj)
+    trace = TraceSession.load(path)
+    kv = [event.model_dump(mode="json") for event in trace.kv_snapshots]
+    mem = [event.model_dump(mode="json") for event in trace.memory_events]
     return kv, mem
 
 
@@ -92,7 +78,11 @@ def main() -> None:
         st.error(f"Trace file not found: `{trace_path}`")
         return
 
-    kv_events, mem_events = _load_jsonl(trace_path)
+    try:
+        kv_events, mem_events = _load_jsonl(trace_path)
+    except TraceLoadError as exc:
+        st.error(f"Could not load trace: {exc}")
+        return
 
     # ── Summary row ────────────────────────────────────────────────────────────
     col1, col2, col3 = st.columns(3)
