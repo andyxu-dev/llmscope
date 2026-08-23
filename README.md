@@ -1,183 +1,155 @@
-# llmscope
+# LLMscope
 
-[![CI](https://img.shields.io/github/actions/workflow/status/llmscope/llmscope/ci.yml)](https://github.com/llmscope/llmscope/actions)
+[![CI](https://img.shields.io/github/actions/workflow/status/andyxu-dev/llmscope/ci.yml?branch=main)](https://github.com/andyxu-dev/llmscope/actions)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.9%2B-blue)](pyproject.toml)
 
-**llmscope** is a lightweight Python library for inspecting LLM inference internals — specifically how KV cache grows token-by-token and how memory is attributed across weights, cache, and activations.
+**LLMscope is a Python tracing and visualization tool for inspecting KV-cache growth and coarse memory attribution during Hugging Face causal language model inference.**
 
-It is **not** a generic observability platform. The focus is narrow and intentional: give ML engineers a clear, step-by-step view of what happens inside a transformer's KV cache during `model.generate()`.
+It is built for a narrow debugging/profiling workflow: run `model.generate()` under a tracer, capture per-step KV-cache snapshots, save those snapshots as JSONL, and inspect growth patterns in a Streamlit dashboard or Python analysis helpers.
 
----
+![LLMscope dashboard overview](assets/dashboard-overview.png)
 
-## What it does
+Dashboard overview from the bundled tiny GPT-2 CPU demo. The demo is intentionally small and reproducible, so the absolute KV-cache sizes are tiny; CUDA allocator metrics are unavailable in this CPU run.
 
+## What It Does
+
+- Attaches a PyTorch forward hook to an architecture-specific model backbone.
+- Extracts `past_key_values` after generation steps when `use_cache=True`.
+- Records per-layer key/value tensor shapes, dtypes, byte counts, and simple float statistics.
+- Records CUDA allocator memory when CUDA is available; on CPU, memory allocation metrics are reported as unavailable.
+- Saves captured KV snapshots and memory events to newline-delimited JSON.
+- Provides analyzers for KV growth, per-layer byte breakdown, outlier-risk heuristics, and analytical KV memory what-if estimates.
+- Provides a Streamlit dashboard that reads a JSONL trace directly.
+
+## Why It Matters
+
+Autoregressive LLM inference stores prior keys and values so each new token can attend to previous context without recomputing the entire prefix. That KV cache grows with sequence length, batch size, layer count, key/value heads, head dimension, and dtype. LLMscope makes that growth visible in a small, inspectable project.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    A["Hugging Face model.generate()"] --> B["Tracer"]
+    B --> C["ArchitectureAdapter"]
+    C --> D["HookManager forward hook"]
+    D --> E["KVCacheSnapshot + MemoryEvent"]
+    E --> F["In-memory ring buffer"]
+    F --> G["JSONL trace via tracer.save()"]
+    G --> H["Streamlit dashboard"]
+    F --> I["Python analyzers"]
 ```
-┌─────────────────────────────────────────────────────────┐
-│  model.generate(input_ids, max_new_tokens=50)           │
-│                          │                              │
-│              hook on model backbone                     │
-│                          │                              │
-│          KVCacheSnapshot per decoding step              │
-│   (layer shapes, byte counts, per-layer float stats)   │
-│                          │                              │
-│     ┌────────────────────┼──────────────────┐          │
-│     ↓                    ↓                  ↓          │
-│  JSONL file         Tracer.summary()   Streamlit UI     │
-└─────────────────────────────────────────────────────────┘
-```
 
-**Single hook, no per-layer overhead.** The hook attaches once to the model backbone (`model.transformer` for GPT-2, `model.model` for Llama-style), capturing the atomic `past_key_values` snapshot after every decoding step.
+This is not a traditional frontend/backend web app. The main system is a Python instrumentation and analysis library. Streamlit is the presentation layer and imports the analysis code directly. A small FastAPI app exists, but only `/api/health` is implemented; the trace endpoint is a placeholder.
 
----
+## Key Features
 
-## Quickstart
+| Feature | Status | Notes |
+|---|---:|---|
+| `Tracer` context manager and explicit start/stop | Implemented | Hooks attach/detach automatically and are idempotent. |
+| GPT-2-family tracing | Implemented and tested | Uses `GPT2Adapter` and tiny random GPT-2 tests. |
+| Llama/Mistral/Qwen2-style adapter | Partial | Adapter exists and is unit-tested with fake modules, not real checkpoints. |
+| JSONL export | Implemented and tested | `tracer.save(path)` writes snapshots and memory events. |
+| Streamlit dashboard | Implemented | Reads JSONL from `LLMSCOPE_TRACE_PATH`; helper logic is tested. |
+| What-if KV estimator | Implemented and tested | Analytical estimate only; it does not quantize a model. |
+| FastAPI backend | Placeholder | Health check works; trace creation returns 501. |
+| CLI | Minimal | Installed `llmscope version` works; `serve` and `instrument` exit without behavior. |
+| Attention-weight capture | Not implemented | The config flag exists, but no capture path is implemented. |
+
+## Example Workflow
 
 ```python
 import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from llmscope import Tracer, Config
+from transformers import GPT2Config, GPT2LMHeadModel
+from llmscope import Tracer
 
-model = AutoModelForCausalLM.from_pretrained("gpt2")
-tokenizer = AutoTokenizer.from_pretrained("gpt2")
-input_ids = tokenizer("Hello, world", return_tensors="pt").input_ids
+cfg = GPT2Config(n_layer=2, n_head=2, n_embd=64, vocab_size=100, n_positions=64)
+model = GPT2LMHeadModel(cfg).eval()
+input_ids = torch.randint(0, 100, (1, 5))
 
-# Context manager — hooks attach/detach automatically
-with Tracer(model, config=Config(sample_every_n_steps=2)) as tracer:
+with Tracer(model) as tracer:
     with torch.no_grad():
-        model.generate(input_ids, max_new_tokens=50, use_cache=True)
+        model.generate(input_ids, max_new_tokens=10, use_cache=True)
 
 print(tracer.summary())
-# llmscope Tracer  session=<uuid>
-# Weights : 548.09 MB
-# KV snapshots : 26 captured
-# KV tokens    : 5 → 54  (0.084 MB latest)
-# Memory : N/A (CPU mode — no CUDA allocator)
-
-tracer.save("run.jsonl")   # all snapshots + memory events as JSONL
+tracer.save("examples/demo_trace.jsonl")
 ```
 
-### Explicit start/stop (Colab cross-cell)
+## Dashboard
 
-```python
-tracer = Tracer(model)
-tracer.start()
-
-# ... other notebook cells ...
-
-tracer.stop()
-```
-
-### Streamlit dashboard
-
-```python
-# Launches a local Streamlit server; returns a Popen handle
-proc = tracer.dashboard(port=8501)
-```
-
-Requires the `dashboard` extra:
+The dashboard consumes an existing JSONL trace:
 
 ```bash
-pip install "llmscope[dashboard]"
+export LLMSCOPE_TRACE_PATH=examples/demo_trace.jsonl
+python -m streamlit run src/llmscope/dashboard/app.py
 ```
 
-The dashboard shows:
-- KV cache size (MB) over decoding steps
-- Per-layer K/V byte breakdown for the latest snapshot
-- Memory attribution: weights / KV cache / activations (residual), with "N/A" on CPU
+It shows KV-cache growth over steps, latest per-layer K/V byte breakdown, latest memory attribution, and an analytical dtype what-if table.
 
----
+![Layer memory analysis dashboard](assets/layer-memory-analysis.png)
+
+Layer and memory analysis from the same tiny GPT-2 CPU demo. The dtype what-if table is an analytical byte estimate for alternative KV-cache dtypes, not actual quantized inference.
 
 ## Installation
 
-Not yet on PyPI (targeting v0.1 release). Install from source:
+This repository is not published to PyPI under the `andyxu-dev/llmscope` project. Install from source:
 
 ```bash
-git clone https://github.com/llmscope/llmscope
+git clone https://github.com/andyxu-dev/llmscope.git
 cd llmscope
-pip install -e "."                   # core only
-pip install -e ".[dashboard]"        # + Streamlit
+python -m pip install -e ".[dashboard,dev]"
 ```
 
-Requires Python ≥ 3.9, PyTorch ≥ 2.0, transformers ≥ 4.35.
+Do not assume `pip install llmscope` installs this repository; the PyPI name is currently occupied by an unrelated project.
 
----
+Requires Python >= 3.9, PyTorch >= 2.0, transformers >= 4.35, pydantic >= 2.0, and numpy. The dashboard extra adds Streamlit and Plotly.
 
-## Run the demo
+## Quick Start
 
-No model download required — uses a tiny random-weight GPT-2:
+No model download is required for the bundled demo:
 
 ```bash
 python examples/demo.py
 ```
 
-This generates a trace, prints a summary, saves `examples/demo_trace.jsonl`, and prints the exact command to open the Streamlit dashboard.
+The demo builds a tiny random-weight GPT-2 model, traces a short CPU generation, prints a summary, and writes `examples/demo_trace.jsonl`.
 
----
+## Example Output
 
-## Config options
-
-```python
-from llmscope import Config
-
-Config(
-    sample_every_n_steps=2,   # capture every 2nd decoding step (default: 1)
-    ring_buffer_size=500,     # max snapshots kept in memory (default: 1000)
-    capture_attention_weights=False,  # not yet implemented
-)
+```text
+llmscope Tracer  session=<uuid>
+Weights : 0.44 MB
+KV snapshots : 10 captured
+KV tokens    : 5 -> 14  (0.014 MB latest)
+Memory : N/A (CPU mode - no CUDA allocator)
 ```
 
----
+## Testing
 
-## Analysis layer
+Verified locally on Python 3.11.14:
 
-```python
-from llmscope.analysis import KVCacheAnalyzer, MemoryProfiler
-
-# KV growth curve + outlier risk
-result = KVCacheAnalyzer().analyze(tracer.kv_snapshots)
-# result.growth_curve        → list of (step, tokens, bytes) points
-# result.latest_per_layer    → per-layer byte breakdown
-# result.outlier_risk        → "low" | "high" | "unknown"
-#   high = k_max/k_std > 10 (signals potential attention sink / outlier dim)
-
-# Memory attribution
-profile = MemoryProfiler().profile(model, latest_snapshot=tracer.kv_snapshots[-1])
-# profile.weights_bytes      → sum of all parameter bytes
-# profile.kv_bytes           → from latest KVCacheSnapshot
-# profile.activations_bytes  → allocated - weights - kv  (None on CPU)
+```bash
+python -m ruff check src tests
+python -m mypy src
+python -m pytest
 ```
 
----
+Current result: 83 tests pass with 82% total coverage.
 
-## Architecture decisions
+## Current Limitations
 
-| Decision | Choice | Rationale |
-|---|---|---|
-| Hook level | Model backbone, not per-attention-layer | Atomic `past_key_values`; no cross-layer sync complexity |
-| Frontend | Streamlit imports core directly | No FastAPI indirection in v0.1 |
-| Storage | In-memory `deque` ring buffer | Low-overhead hot path; `save()` for persistence |
-| Memory | Residual method | `activations = total_allocated − weights − kv`; CPU → N/A |
-| Cache format | Handles all three transformers KV formats | tuple-of-tuples (≤4.35), `.key_cache/.value_cache` (4.36–4.x), `.layers[i].keys/.values` (5.x) |
-
----
-
+- CPU runs are supported for KV-cache tracing, but CUDA allocator memory metrics are unavailable on CPU.
+- LLMscope does not intercept CUDA allocations directly; activation memory is estimated as a residual from allocator totals.
+- Per-layer attribution applies to KV bytes from tensor sizes, not full GPU memory ownership.
+- What-if precision analysis is analytical only; it does not run quantized inference.
+- Real Llama/Mistral/Qwen2 checkpoint tracing is not covered by tests in this repo.
+- Streamlit is the main UI; there is no production backend or real-time streaming API.
+- `Tracer.load()`, `Tracer.serve()`, attention-weight capture, and the `/api/trace` endpoint are not implemented.
 
 ## Roadmap
 
-- [ ] Llama / Qwen / Mistral / Phi-3 adapters
-- [ ] What-if KV memory estimator (quantization impact lookup table)
-- [ ] FastAPI + SSE for real-time streaming dashboards
-- [ ] Colab demo notebook
-- [ ] PyPI release (v0.1)
-
----
-
-## Contributing
-
-Issues and PRs welcome. Run the test suite with:
-
-```bash
-pip install -e ".[dev]"
-pytest
-```
+- Add real-checkpoint adapter validation for Llama, Mistral, Qwen2, and related grouped-query attention models.
+- Implement replay/loading for JSONL traces.
+- Add a safer CLI for running demos and launching the dashboard.
+- Decide whether to rename the package or publish under a non-conflicting PyPI name.
+- Expand dashboard test coverage with a browser-level smoke test.
