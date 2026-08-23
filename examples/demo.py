@@ -10,9 +10,12 @@ from transformers import GPT2Config, GPT2LMHeadModel  # type: ignore[import-unty
 from llmscope import Tracer
 
 TRACE_PATH = Path(__file__).parent / "demo_trace.jsonl"
+SEED = 42
 
 
 def main() -> None:
+    torch.manual_seed(SEED)
+
     cfg = GPT2Config(
         n_layer=2,
         n_head=2,
