@@ -52,7 +52,8 @@ This is not a traditional frontend/backend web app. The main system is a Python 
 | `Tracer` context manager and explicit start/stop | Implemented | Hooks attach/detach automatically and are idempotent. |
 | GPT-2-family tracing | Implemented and tested | Uses `GPT2Adapter` and tiny random GPT-2 integration tests. |
 | Llama-style tracing | Implemented and optionally tested | `CausalLMAdapter` is validated against the tiny `SimpleStories/SimpleStories-1.25M` checkpoint. |
-| Mistral/Qwen2-style adapter | Partial | Adapter path is unit-tested with fake modules, not real checkpoints. |
+| Qwen2/Qwen2.5-style tracing | Implemented and optionally tested | `CausalLMAdapter` is validated against the tiny `trl-internal-testing/tiny-Qwen2ForCausalLM-2.5` checkpoint. |
+| Mistral-style adapter | Partial | Adapter path is unit-tested with fake modules, not a real checkpoint. |
 | JSONL export | Implemented and tested | `tracer.save(path)` writes snapshots and memory events. |
 | JSONL load | Implemented and tested | `TraceSession.load(path)` reconstructs typed snapshots and memory events without a model. |
 | Streamlit dashboard | Implemented | Reads JSONL from `LLMSCOPE_TRACE_PATH`; helper logic is tested. |
@@ -149,7 +150,7 @@ python -m mypy src
 python -m pytest -q
 ```
 
-Current result: 92 tests pass, with 1 optional integration test skipped, and 82% total coverage.
+Current result: 92 tests pass, with 2 optional integration tests skipped, and 82% total coverage.
 
 ## Current Limitations
 
@@ -158,14 +159,15 @@ Current result: 92 tests pass, with 1 optional integration test skipped, and 82%
 - Per-layer attribution applies to KV bytes from tensor sizes, not full GPU memory ownership.
 - What-if precision analysis is analytical only; it does not run quantized inference.
 - Llama checkpoint tracing is validated with one tiny public checkpoint only.
-- Real Mistral/Qwen2 checkpoint tracing is not covered by tests in this repo.
+- Qwen2/Qwen2.5 checkpoint tracing is validated with one tiny public checkpoint only.
+- Real Mistral checkpoint tracing is not covered by tests in this repo.
 - Streamlit is the main UI; there is no production backend or real-time streaming API.
 - `Tracer.load()` is intentionally not part of the live tracer API; use `TraceSession.load()` for saved JSONL traces.
 - `Tracer.serve()`, attention-weight capture, and the `/api/trace` endpoint are not implemented.
 
 ## Roadmap
 
-- Add real-checkpoint adapter validation for Mistral, Qwen2, and related grouped-query attention models.
+- Add real-checkpoint adapter validation for Mistral and related grouped-query attention models.
 - Add a safer CLI for running demos and launching the dashboard.
 - Decide whether to rename the package or publish under a non-conflicting PyPI name.
 - Expand dashboard test coverage with a browser-level smoke test.
