@@ -74,3 +74,6 @@ select = ["E", "F", "I"]
 minversion = "7.0"
 addopts = "--cov=src --cov-report=term-missing"
 testpaths = ["tests"]
+markers = [
+    "integration: optional tests that may download public model checkpoints",
+]
