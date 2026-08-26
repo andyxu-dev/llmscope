@@ -21,6 +21,7 @@ Dashboard overview from the bundled tiny GPT-2 CPU demo. The demo is intentional
 - Saves captured KV snapshots and memory events to newline-delimited JSON.
 - Loads saved JSONL traces as typed, read-only trace sessions for offline analysis.
 - Provides analyzers for KV growth, per-layer byte breakdown, outlier-risk heuristics, and analytical KV memory what-if estimates.
+- Estimates CUDA token headroom from observed KV growth and caller-provided GPU capacity.
 - Provides a Streamlit dashboard that reads a JSONL trace directly.
 
 ## Why It Matters
@@ -58,6 +59,7 @@ This is not a traditional frontend/backend web app. The main system is a Python 
 | JSONL load | Implemented and tested | `TraceSession.load(path)` reconstructs typed snapshots and memory events without a model. |
 | Streamlit dashboard | Implemented | Reads JSONL from `LLMSCOPE_TRACE_PATH`; helper logic is tested. |
 | What-if KV estimator | Implemented and tested | Analytical estimate only; it does not quantize a model. |
+| OOM headroom estimator | Implemented and tested | Conservative estimate from observed KV growth, CUDA allocator usage, and explicit device capacity. |
 | FastAPI backend | Placeholder | Health check works; trace creation returns 501. |
 | CLI | Minimal | Installed `llmscope version` works; `serve` and `instrument` exit without behavior. |
 | Attention-weight capture | Not implemented | The config flag exists, but no capture path is implemented. |
@@ -90,6 +92,27 @@ from llmscope.analysis import KVCacheAnalyzer
 trace = TraceSession.load("examples/demo_trace.jsonl")
 result = KVCacheAnalyzer().analyze(trace.kv_snapshots)
 ```
+
+CUDA traces can also be used for conservative token-headroom estimates:
+
+```python
+from llmscope.analysis import OOMAnalyzer
+
+headroom = OOMAnalyzer().estimate(
+    snapshots=trace.kv_snapshots,
+    memory_events=trace.memory_events,
+    device_capacity_bytes=24 * 1024**3,
+    safety_margin_bytes=1 * 1024**3,
+)
+```
+
+The OOM analyzer observes KV-cache growth and estimates how much additional KV
+growth can fit if non-KV allocated memory remains approximately constant. It is
+not a guaranteed CUDA OOM prediction: temporary allocations, changing activation
+memory, allocator fragmentation, other GPU processes, PyTorch reserved-memory
+behavior, and model-specific generation differences can make real behavior
+differ. Set `safety_margin_bytes` to reserve extra capacity for a more
+conservative estimate.
 
 ## Dashboard
 
@@ -150,7 +173,7 @@ python -m mypy src
 python -m pytest -q
 ```
 
-Current result: 92 tests pass, with 2 optional integration tests skipped, and 82% total coverage.
+Current result: 114 tests pass, with 2 optional integration tests skipped, and 83% total coverage.
 
 ## Current Limitations
 
@@ -158,6 +181,7 @@ Current result: 92 tests pass, with 2 optional integration tests skipped, and 82
 - LLMscope does not intercept CUDA allocations directly; activation memory is estimated as a residual from allocator totals.
 - Per-layer attribution applies to KV bytes from tensor sizes, not full GPU memory ownership.
 - What-if precision analysis is analytical only; it does not run quantized inference.
+- OOM diagnostics estimate KV-growth headroom only; they are not guaranteed OOM predictions.
 - Llama checkpoint tracing is validated with one tiny public checkpoint only.
 - Qwen2/Qwen2.5 checkpoint tracing is validated with one tiny public checkpoint only.
 - Real Mistral checkpoint tracing is not covered by tests in this repo.
