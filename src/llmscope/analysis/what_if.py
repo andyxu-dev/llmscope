@@ -23,6 +23,22 @@ _BYTES_PER_ELEMENT: dict[str, float] = {
     "int4": 0.5,
 }
 
+_DTYPE_ALIASES: dict[str, str] = {
+    "float32": "fp32",
+    "torch.float32": "fp32",
+    "fp32": "fp32",
+    "float16": "fp16",
+    "torch.float16": "fp16",
+    "half": "fp16",
+    "fp16": "fp16",
+    "bfloat16": "bf16",
+    "torch.bfloat16": "bf16",
+    "bf16": "bf16",
+    "int8": "int8",
+    "torch.int8": "int8",
+    "int4": "int4",
+}
+
 # fp16 is the reference baseline for savings calculations.
 _BASELINE_DTYPE = "fp16"
 
@@ -31,6 +47,27 @@ def _require_positive_int(name: str, value: object) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
         raise ValueError(f"{name} must be positive; expected an integer, got {value!r}")
     return value
+
+
+def normalize_kv_dtype(dtype: str) -> str:
+    """Return the canonical analytical dtype name used by what-if estimators."""
+    if not isinstance(dtype, str):
+        raise ValueError(
+            f"dtype must be one of {sorted(_BYTES_PER_ELEMENT)}, got {dtype!r}"
+        )
+
+    normalized = dtype.strip().lower()
+    canonical = _DTYPE_ALIASES.get(normalized)
+    if canonical is None:
+        raise ValueError(
+            f"Unknown dtype '{dtype}'. Supported: {sorted(_BYTES_PER_ELEMENT)}"
+        )
+    return canonical
+
+
+def bytes_per_element(dtype: str) -> float:
+    """Return analytical bytes per KV element for a supported dtype."""
+    return _BYTES_PER_ELEMENT[normalize_kv_dtype(dtype)]
 
 
 @dataclass
@@ -127,19 +164,11 @@ class WhatIfEstimator:
 
         Raises ValueError for unknown dtype, non-positive dimensions.
         """
-        if not isinstance(dtype, str):
-            raise ValueError(
-                f"dtype must be one of {sorted(_BYTES_PER_ELEMENT)}, got {dtype!r}"
-            )
-        dtype = dtype.strip().lower()
-        if dtype not in _BYTES_PER_ELEMENT:
-            raise ValueError(
-                f"Unknown dtype '{dtype}'. Supported: {sorted(_BYTES_PER_ELEMENT)}"
-            )
+        dtype = normalize_kv_dtype(dtype)
         sequence_length = _require_positive_int("sequence_length", sequence_length)
         batch_size = _require_positive_int("batch_size", batch_size)
 
-        bpe = _BYTES_PER_ELEMENT[dtype]
+        bpe = bytes_per_element(dtype)
         # KV cache = 2 tensors (K and V) per layer
         elements = (
             2

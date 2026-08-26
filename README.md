@@ -20,7 +20,7 @@ Dashboard overview from the bundled tiny GPT-2 CPU demo. The demo is intentional
 - Records CUDA allocator memory when CUDA is available; on CPU, memory allocation metrics are reported as unavailable.
 - Saves captured KV snapshots and memory events to newline-delimited JSON.
 - Loads saved JSONL traces as typed, read-only trace sessions for offline analysis.
-- Provides analyzers for KV growth, per-layer byte breakdown, outlier-risk heuristics, and analytical KV memory what-if estimates.
+- Provides analyzers for KV growth, per-layer byte breakdown, outlier-risk heuristics, and analytical KV memory/precision what-if estimates.
 - Estimates CUDA token headroom from observed KV growth and caller-provided GPU capacity.
 - Provides a Streamlit dashboard that reads a JSONL trace directly.
 
@@ -60,6 +60,7 @@ This is not a traditional frontend/backend web app. The main system is a Python 
 | Streamlit dashboard | Implemented | Reads JSONL from `LLMSCOPE_TRACE_PATH`; helper logic is tested. |
 | What-if KV estimator | Implemented and tested | Analytical estimate only; it does not quantize a model. |
 | OOM headroom estimator | Implemented and tested | Conservative estimate from observed KV growth, CUDA allocator usage, and explicit device capacity. |
+| OOM precision scenarios | Implemented and tested | Analytical estimate of how KV storage precision could affect current headroom and future KV growth. |
 | FastAPI backend | Placeholder | Health check works; trace creation returns 501. |
 | CLI | Minimal | Installed `llmscope version` works; `serve` and `instrument` exit without behavior. |
 | Attention-weight capture | Not implemented | The config flag exists, but no capture path is implemented. |
@@ -105,6 +106,27 @@ headroom = OOMAnalyzer().estimate(
     safety_margin_bytes=1 * 1024**3,
 )
 ```
+
+Analytical KV precision scenarios can estimate how changing KV storage size would
+affect the same headroom calculation:
+
+```python
+from llmscope.analysis import OOMAnalyzer
+
+scenarios = OOMAnalyzer().compare_kv_precision(
+    snapshots=trace.kv_snapshots,
+    memory_events=trace.memory_events,
+    device_capacity_bytes=24 * 1024**3,
+    target_dtypes=("fp16", "int8", "int4"),
+)
+```
+
+These scenarios do not enable KV quantization or guarantee that a model/runtime
+supports the requested precision. They replace the observed KV footprint with an
+analytical target size and scale future KV growth by the same byte-width ratio.
+Actual runtime memory may differ because of quantization metadata, packing,
+padding, alignment, allocator behavior, temporary buffers, and kernel details.
+INT4 is modeled as a theoretical packed 0.5-byte-per-element estimate.
 
 The OOM analyzer observes KV-cache growth and estimates how much additional KV
 growth can fit if non-KV allocated memory remains approximately constant. It is
@@ -173,7 +195,7 @@ python -m mypy src
 python -m pytest -q
 ```
 
-Current result: 114 tests pass, with 2 optional integration tests skipped, and 83% total coverage.
+Current result: 134 tests pass, with 2 optional integration tests skipped, and 84% total coverage.
 
 ## Current Limitations
 
@@ -181,7 +203,7 @@ Current result: 114 tests pass, with 2 optional integration tests skipped, and 8
 - LLMscope does not intercept CUDA allocations directly; activation memory is estimated as a residual from allocator totals.
 - Per-layer attribution applies to KV bytes from tensor sizes, not full GPU memory ownership.
 - What-if precision analysis is analytical only; it does not run quantized inference.
-- OOM diagnostics estimate KV-growth headroom only; they are not guaranteed OOM predictions.
+- OOM diagnostics estimate KV-growth headroom only; they are not guaranteed OOM predictions or automatic optimization recommendations.
 - Llama checkpoint tracing is validated with one tiny public checkpoint only.
 - Qwen2/Qwen2.5 checkpoint tracing is validated with one tiny public checkpoint only.
 - Real Mistral checkpoint tracing is not covered by tests in this repo.

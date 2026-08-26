@@ -262,6 +262,12 @@ def test_dtype_case_insensitive() -> None:
     assert est_lower.total_bytes == est_upper.total_bytes
 
 
+def test_dtype_aliases_normalize_to_canonical_names() -> None:
+    est = _estimator().estimate(sequence_length=100, dtype="float16")
+
+    assert est.dtype == "fp16"
+
+
 # ── mb helper ─────────────────────────────────────────────────────────────────
 
 def test_total_mb_helper() -> None:
