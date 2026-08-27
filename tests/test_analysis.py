@@ -60,6 +60,80 @@ def _make_snapshot(step: int, tokens: int, **layer_kwargs: float) -> KVCacheSnap
     )
 
 
+def _make_dashboard_snapshot(
+    step: int,
+    tokens: int,
+    total_bytes: int,
+    dtype: str = "float16",
+) -> KVCacheSnapshot:
+    return KVCacheSnapshot(
+        session_id="test",
+        timestamp=datetime.now(tz=timezone.utc),
+        step_index=step,
+        per_layer=[
+            LayerKVStats(
+                layer_idx=0,
+                k_shape=(1, 1, tokens, 1),
+                v_shape=(1, 1, tokens, 1),
+                k_dtype=dtype,
+                v_dtype=dtype,
+                k_bytes=total_bytes // 2,
+                v_bytes=total_bytes - (total_bytes // 2),
+                k_min=-1.0,
+                k_max=1.0,
+                k_mean=0.0,
+                k_std=0.5,
+                v_min=-1.0,
+                v_max=1.0,
+                v_mean=0.0,
+                v_std=0.5,
+            )
+        ],
+        total_bytes=total_bytes,
+        total_tokens=tokens,
+    )
+
+
+def _make_dashboard_snapshots() -> list[KVCacheSnapshot]:
+    return [
+        _make_dashboard_snapshot(0, 10, 1_000),
+        _make_dashboard_snapshot(1, 15, 1_500),
+        _make_dashboard_snapshot(2, 20, 2_000),
+    ]
+
+
+def _make_dashboard_memory(
+    allocated: int = 7_000,
+    reserved: int = 8_000,
+    peak: int = 8_500,
+) -> MemoryEvent:
+    return MemoryEvent(
+        session_id="test",
+        timestamp=datetime.now(tz=timezone.utc),
+        allocated_bytes=allocated,
+        reserved_bytes=reserved,
+        peak_allocated_bytes=peak,
+        breakdown={"weights": 4_000, "kv_cache": 2_000, "activations": 1_000},
+    )
+
+
+def _dashboard_row(rows: list[dict[str, str]], metric: str) -> str:
+    for row in rows:
+        if row["Metric"] == metric:
+            return row["Estimate"]
+    raise AssertionError(f"Missing dashboard row: {metric}")
+
+
+def _dashboard_precision_row(
+    rows: list[dict[str, str]],
+    target_dtype: str,
+) -> dict[str, str]:
+    for row in rows:
+        if row["Target KV dtype"].startswith(target_dtype):
+            return row
+    raise AssertionError(f"Missing precision row: {target_dtype}")
+
+
 # ── KVCacheAnalyzer ───────────────────────────────────────────────────────────
 
 def test_kv_analyzer_empty_snapshots() -> None:
@@ -236,6 +310,156 @@ def test_dashboard_helpers_tolerate_missing_fields() -> None:
     assert kv_mb == 0.0
     assert act_mb == 0.0
     assert on_gpu is False
+
+
+def test_dashboard_oom_cpu_trace_data_is_unavailable() -> None:
+    from llmscope.dashboard.app import _prepare_oom_summary_rows
+
+    estimate, rows = _prepare_oom_summary_rows(
+        snapshots=_make_dashboard_snapshots(),
+        memory_events=[_make_dashboard_memory(allocated=0, reserved=0, peak=0)],
+        device_capacity_bytes=10_000,
+        safety_margin_bytes=0,
+    )
+
+    assert estimate.status == "unavailable"
+    assert rows == []
+
+
+def test_dashboard_oom_cuda_trace_data_is_available() -> None:
+    from llmscope.dashboard.app import _prepare_oom_summary_rows
+
+    estimate, rows = _prepare_oom_summary_rows(
+        snapshots=_make_dashboard_snapshots(),
+        memory_events=[_make_dashboard_memory(allocated=7_000)],
+        device_capacity_bytes=10_000,
+        safety_margin_bytes=0,
+    )
+
+    assert estimate.status == "available"
+    assert rows
+
+
+def test_dashboard_oom_summary_contains_additional_tokens() -> None:
+    from llmscope.dashboard.app import _prepare_oom_summary_rows
+
+    _, rows = _prepare_oom_summary_rows(
+        snapshots=_make_dashboard_snapshots(),
+        memory_events=[_make_dashboard_memory(allocated=7_000)],
+        device_capacity_bytes=10_000,
+        safety_margin_bytes=1_000,
+    )
+
+    assert _dashboard_row(rows, "Estimated additional tokens") == "20"
+
+
+def test_dashboard_oom_summary_contains_estimated_max_tokens() -> None:
+    from llmscope.dashboard.app import _prepare_oom_summary_rows
+
+    _, rows = _prepare_oom_summary_rows(
+        snapshots=_make_dashboard_snapshots(),
+        memory_events=[_make_dashboard_memory(allocated=7_000)],
+        device_capacity_bytes=10_000,
+        safety_margin_bytes=1_000,
+    )
+
+    assert _dashboard_row(rows, "Estimated maximum sequence length") == "40"
+
+
+def test_dashboard_safety_margin_affects_displayed_estimate() -> None:
+    from llmscope.dashboard.app import _prepare_oom_summary_rows
+
+    _, no_margin = _prepare_oom_summary_rows(
+        snapshots=_make_dashboard_snapshots(),
+        memory_events=[_make_dashboard_memory(allocated=7_000)],
+        device_capacity_bytes=10_000,
+        safety_margin_bytes=0,
+    )
+    _, with_margin = _prepare_oom_summary_rows(
+        snapshots=_make_dashboard_snapshots(),
+        memory_events=[_make_dashboard_memory(allocated=7_000)],
+        device_capacity_bytes=10_000,
+        safety_margin_bytes=1_000,
+    )
+
+    assert _dashboard_row(no_margin, "Estimated remaining memory headroom") == (
+        "2.93 KiB"
+    )
+    assert _dashboard_row(with_margin, "Estimated remaining memory headroom") == (
+        "1.95 KiB"
+    )
+
+
+def test_dashboard_precision_rows_include_current_int8_and_int4() -> None:
+    from llmscope.dashboard.app import _prepare_precision_scenario_rows
+
+    rows = _prepare_precision_scenario_rows(
+        snapshots=_make_dashboard_snapshots(),
+        memory_events=[_make_dashboard_memory(allocated=7_000)],
+        device_capacity_bytes=10_000,
+        safety_margin_bytes=1_000,
+    )
+
+    assert [row["Target KV dtype"] for row in rows] == [
+        "fp16 (current)",
+        "int8",
+        "int4",
+    ]
+
+
+def test_dashboard_precision_int8_row_preserves_phase_4b_math() -> None:
+    from llmscope.dashboard.app import _prepare_precision_scenario_rows
+
+    rows = _prepare_precision_scenario_rows(
+        snapshots=_make_dashboard_snapshots(),
+        memory_events=[_make_dashboard_memory(allocated=7_000)],
+        device_capacity_bytes=10_000,
+        safety_margin_bytes=1_000,
+    )
+    int8_row = _dashboard_precision_row(rows, "int8")
+
+    assert int8_row["Projected current KV"] == "1000 B"
+    assert int8_row["Projected allocated GPU memory"] == "5.86 KiB"
+    assert int8_row["Projected KV growth/token"] == "50 B / token"
+    assert int8_row["Projected headroom"] == "2.93 KiB"
+    assert int8_row["Estimated additional tokens"] == "60"
+    assert int8_row["Estimated max tokens"] == "80"
+
+
+def test_dashboard_precision_int4_row_is_marked_analytical() -> None:
+    from llmscope.dashboard.app import _prepare_precision_scenario_rows
+
+    rows = _prepare_precision_scenario_rows(
+        snapshots=_make_dashboard_snapshots(),
+        memory_events=[_make_dashboard_memory(allocated=7_000)],
+        device_capacity_bytes=10_000,
+        safety_margin_bytes=1_000,
+    )
+    int4_row = _dashboard_precision_row(rows, "int4")
+
+    assert int4_row["Notes"] == "analytical storage-size scenario"
+
+
+def test_dashboard_precision_target_selection_avoids_duplicates() -> None:
+    from llmscope.dashboard.app import _select_precision_target_dtypes
+
+    assert _select_precision_target_dtypes("fp16") == ("fp16", "int8", "int4")
+    assert _select_precision_target_dtypes("int8") == ("int8", "fp16", "int4")
+
+
+def test_dashboard_byte_formatter_uses_binary_units() -> None:
+    from llmscope.dashboard.app import _format_bytes
+
+    assert _format_bytes(1024) == "1.00 KiB"
+    assert _format_bytes(1024**2) == "1.00 MiB"
+    assert _format_bytes(1024**3) == "1.00 GiB"
+
+
+def test_dashboard_byte_formatter_handles_zero_and_none() -> None:
+    from llmscope.dashboard.app import _format_bytes
+
+    assert _format_bytes(0) == "0 B"
+    assert _format_bytes(None) == "N/A"
 
 
 def test_dashboard_no_streamlit_raises() -> None:

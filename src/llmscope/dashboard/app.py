@@ -4,17 +4,39 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Optional, Sequence
 
 from llmscope import TraceLoadError, TraceSession
+from llmscope.analysis import KVPrecisionOOMScenario, OOMAnalyzer, OOMEstimate
+from llmscope.analysis.what_if import normalize_kv_dtype
+from llmscope.core.events import KVCacheSnapshot, MemoryEvent
 
 # Allow running as `streamlit run app.py --` with LLMSCOPE_TRACE_PATH env var
 TRACE_PATH_ENV = "LLMSCOPE_TRACE_PATH"
+_DEFAULT_GPU_CAPACITY_GIB = 24.0
+_OOM_UNAVAILABLE_MESSAGE = (
+    "OOM headroom estimate unavailable: this trace does not contain CUDA allocator "
+    "telemetry."
+)
+_OOM_CAVEAT = (
+    "OOM headroom is analytical, not a guaranteed prediction. It assumes non-KV "
+    "allocated memory remains approximately constant. Real behavior can differ "
+    "because of temporary CUDA allocations, fragmentation, allocator behavior, "
+    "other GPU processes, and model behavior. INT8/INT4 scenarios model "
+    "theoretical KV storage size only; actual quantized-cache implementations may "
+    "include scale metadata, packing/alignment overhead, kernels, and temporary "
+    "memory."
+)
+
+
+def _load_trace(path: Path) -> TraceSession:
+    """Load a typed TraceSession for dashboard analysis."""
+    return TraceSession.load(path)
 
 
 def _load_jsonl(path: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Return (kv_snapshots_dicts, memory_event_dicts) from a JSONL file."""
-    trace = TraceSession.load(path)
+    trace = _load_trace(path)
     kv = [event.model_dump(mode="json") for event in trace.kv_snapshots]
     mem = [event.model_dump(mode="json") for event in trace.memory_events]
     return kv, mem
@@ -59,6 +81,189 @@ def _memory_values(mem: dict[str, Any]) -> tuple[float, float, float, float, boo
     return allocated, weights_mb, kv_mb, act_mb, allocated > 0
 
 
+def _format_bytes(value: int | float | None) -> str:
+    """Format byte counts with binary units for dashboard display."""
+    if value is None:
+        return "N/A"
+
+    numeric = float(value)
+    if numeric == 0:
+        return "0 B"
+
+    units = ("B", "KiB", "MiB", "GiB", "TiB")
+    abs_value = abs(numeric)
+    unit_index = 0
+    while abs_value >= 1024 and unit_index < len(units) - 1:
+        numeric /= 1024
+        abs_value /= 1024
+        unit_index += 1
+
+    if unit_index == 0:
+        if numeric.is_integer():
+            return f"{int(numeric)} B"
+        return f"{numeric:.2f} B"
+    return f"{numeric:.2f} {units[unit_index]}"
+
+
+def _gib_to_bytes(value_gib: float) -> int:
+    """Convert a GiB UI value to bytes."""
+    if value_gib < 0:
+        raise ValueError("GiB value must be non-negative")
+    return int(value_gib * 1024**3)
+
+
+def _format_tokens(value: int | None) -> str:
+    if value is None:
+        return "N/A"
+    return f"{value:,}"
+
+
+def _prepare_oom_summary_rows(
+    *,
+    snapshots: Sequence[KVCacheSnapshot],
+    memory_events: Sequence[MemoryEvent],
+    device_capacity_bytes: int,
+    safety_margin_bytes: int,
+) -> tuple[OOMEstimate, list[dict[str, str]]]:
+    """Prepare display rows for the OOM headroom estimate."""
+    estimate = OOMAnalyzer().estimate(
+        snapshots=snapshots,
+        memory_events=memory_events,
+        device_capacity_bytes=device_capacity_bytes,
+        safety_margin_bytes=safety_margin_bytes,
+    )
+    if estimate.status == "unavailable":
+        return estimate, []
+
+    rows = [
+        {
+            "Metric": "Current sequence length",
+            "Estimate": _format_tokens(estimate.current_tokens),
+        },
+        {
+            "Metric": "Current KV cache size",
+            "Estimate": _format_bytes(estimate.current_kv_bytes),
+        },
+        {
+            "Metric": "Observed KV growth per token",
+            "Estimate": f"{_format_bytes(estimate.kv_growth_bytes_per_token)} / token",
+        },
+        {
+            "Metric": "Current allocated GPU memory",
+            "Estimate": _format_bytes(estimate.current_allocated_bytes),
+        },
+        {
+            "Metric": "Current reserved GPU memory",
+            "Estimate": _format_bytes(estimate.current_reserved_bytes),
+        },
+        {
+            "Metric": "Device capacity assumption",
+            "Estimate": _format_bytes(device_capacity_bytes),
+        },
+        {
+            "Metric": "Safety margin",
+            "Estimate": _format_bytes(safety_margin_bytes),
+        },
+        {
+            "Metric": "Estimated remaining memory headroom",
+            "Estimate": _format_bytes(estimate.estimated_headroom_bytes),
+        },
+        {
+            "Metric": "Estimated additional tokens",
+            "Estimate": _format_tokens(estimate.estimated_additional_tokens),
+        },
+        {
+            "Metric": "Estimated maximum sequence length",
+            "Estimate": _format_tokens(estimate.estimated_max_tokens),
+        },
+    ]
+    return estimate, rows
+
+
+def _current_dtype_for_precision_targets(
+    snapshots: Sequence[KVCacheSnapshot],
+) -> str | None:
+    if not snapshots or not snapshots[-1].per_layer:
+        return None
+
+    dtypes = set()
+    try:
+        for layer in snapshots[-1].per_layer:
+            dtypes.add(normalize_kv_dtype(layer.k_dtype))
+            dtypes.add(normalize_kv_dtype(layer.v_dtype))
+    except ValueError:
+        return None
+
+    if len(dtypes) != 1:
+        return None
+    return dtypes.pop()
+
+
+def _select_precision_target_dtypes(current_dtype: str | None) -> tuple[str, ...]:
+    """Select useful precision targets while avoiding duplicate rows."""
+    candidates = [current_dtype, "fp16", "int8", "int4"]
+    selected: list[str] = []
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        canonical = normalize_kv_dtype(candidate)
+        if canonical not in selected:
+            selected.append(canonical)
+    return tuple(selected)
+
+
+def _prepare_precision_scenario_rows(
+    *,
+    snapshots: Sequence[KVCacheSnapshot],
+    memory_events: Sequence[MemoryEvent],
+    device_capacity_bytes: int,
+    safety_margin_bytes: int,
+) -> list[dict[str, str]]:
+    """Prepare display rows for analytical KV precision OOM scenarios."""
+    current_dtype = _current_dtype_for_precision_targets(snapshots)
+    target_dtypes = _select_precision_target_dtypes(current_dtype)
+    scenarios = OOMAnalyzer().compare_kv_precision(
+        snapshots=snapshots,
+        memory_events=memory_events,
+        device_capacity_bytes=device_capacity_bytes,
+        safety_margin_bytes=safety_margin_bytes,
+        target_dtypes=target_dtypes,
+    )
+    return [_precision_scenario_row(scenario) for scenario in scenarios]
+
+
+def _precision_scenario_row(scenario: KVPrecisionOOMScenario) -> dict[str, str]:
+    is_current = scenario.target_dtype == scenario.current_dtype
+    dtype_label = scenario.target_dtype
+    if is_current:
+        dtype_label = f"{dtype_label} (current)"
+
+    if scenario.target_dtype in {"int8", "int4"} and not is_current:
+        note = "analytical storage-size scenario"
+    elif is_current:
+        note = "current precision"
+    else:
+        note = "analytical storage-size scenario"
+
+    return {
+        "Target KV dtype": dtype_label,
+        "Projected current KV": _format_bytes(scenario.projected_current_kv_bytes),
+        "Projected allocated GPU memory": _format_bytes(
+            scenario.projected_current_allocated_bytes
+        ),
+        "Projected KV growth/token": (
+            f"{_format_bytes(scenario.projected_kv_growth_bytes_per_token)} / token"
+        ),
+        "Projected headroom": _format_bytes(scenario.projected_headroom_bytes),
+        "Estimated additional tokens": _format_tokens(
+            scenario.estimated_additional_tokens
+        ),
+        "Estimated max tokens": _format_tokens(scenario.estimated_max_tokens),
+        "Status": scenario.status,
+        "Notes": note,
+    }
+
+
 def main() -> None:
     import streamlit as st
 
@@ -79,10 +284,12 @@ def main() -> None:
         return
 
     try:
-        kv_events, mem_events = _load_jsonl(trace_path)
+        trace = _load_trace(trace_path)
     except TraceLoadError as exc:
         st.error(f"Could not load trace: {exc}")
         return
+    kv_events = [event.model_dump(mode="json") for event in trace.kv_snapshots]
+    mem_events = [event.model_dump(mode="json") for event in trace.memory_events]
 
     # ── Summary row ────────────────────────────────────────────────────────────
     col1, col2, col3 = st.columns(3)
@@ -171,6 +378,63 @@ def main() -> None:
             mc4.metric("Total allocated", "N/A — CPU")
     else:
         st.info("No memory events in this trace.")
+
+    # ── OOM headroom estimate ─────────────────────────────────────────────────
+    st.subheader("OOM Headroom Estimate")
+    oc1, oc2 = st.columns(2)
+    capacity_gib = oc1.number_input(
+        "GPU capacity assumption (GiB)",
+        min_value=0.01,
+        value=_DEFAULT_GPU_CAPACITY_GIB,
+        step=1.0,
+        help=(
+            "User-provided assumption; saved traces do not store total GPU "
+            "capacity."
+        ),
+    )
+    margin_gib = oc2.number_input(
+        "Safety margin (GiB)",
+        min_value=0.0,
+        value=0.0,
+        step=0.5,
+        help="User-provided capacity reserve for a more conservative estimate.",
+    )
+
+    try:
+        device_capacity_bytes = _gib_to_bytes(float(capacity_gib))
+        safety_margin_bytes = _gib_to_bytes(float(margin_gib))
+        oom_estimate, oom_rows = _prepare_oom_summary_rows(
+            snapshots=trace.kv_snapshots,
+            memory_events=trace.memory_events,
+            device_capacity_bytes=device_capacity_bytes,
+            safety_margin_bytes=safety_margin_bytes,
+        )
+    except ValueError as exc:
+        st.warning(f"Invalid OOM assumptions: {exc}")
+    else:
+        if oom_estimate.status == "unavailable":
+            st.info(_OOM_UNAVAILABLE_MESSAGE)
+        else:
+            if oom_estimate.status == "at_or_over_limit":
+                st.warning(
+                    "Current allocated GPU memory is at or above the effective "
+                    "capacity assumption."
+                )
+            st.table(oom_rows)
+            st.caption(_OOM_CAVEAT)
+
+            scenario_rows = _prepare_precision_scenario_rows(
+                snapshots=trace.kv_snapshots,
+                memory_events=trace.memory_events,
+                device_capacity_bytes=device_capacity_bytes,
+                safety_margin_bytes=safety_margin_bytes,
+            )
+            st.subheader("KV Precision OOM Scenarios")
+            st.caption(
+                "These scenarios model KV storage size only. They do not enable "
+                "KV quantization or guarantee model/runtime support."
+            )
+            st.table(scenario_rows)
 
     # ── What-if estimator ──────────────────────────────────────────────────────
     st.subheader("What-if: KV Cache Memory by dtype")

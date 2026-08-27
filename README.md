@@ -22,7 +22,8 @@ Dashboard overview from the bundled tiny GPT-2 CPU demo. The demo is intentional
 - Loads saved JSONL traces as typed, read-only trace sessions for offline analysis.
 - Provides analyzers for KV growth, per-layer byte breakdown, outlier-risk heuristics, and analytical KV memory/precision what-if estimates.
 - Estimates CUDA token headroom from observed KV growth and caller-provided GPU capacity.
-- Provides a Streamlit dashboard that reads a JSONL trace directly.
+- Provides a Streamlit dashboard that reads a JSONL trace directly, including
+  OOM headroom estimates when CUDA allocator telemetry is available.
 
 ## Why It Matters
 
@@ -57,7 +58,7 @@ This is not a traditional frontend/backend web app. The main system is a Python 
 | Mistral-style adapter | Partial | Adapter path is unit-tested with fake modules, not a real checkpoint. |
 | JSONL export | Implemented and tested | `tracer.save(path)` writes snapshots and memory events. |
 | JSONL load | Implemented and tested | `TraceSession.load(path)` reconstructs typed snapshots and memory events without a model. |
-| Streamlit dashboard | Implemented | Reads JSONL from `LLMSCOPE_TRACE_PATH`; helper logic is tested. |
+| Streamlit dashboard | Implemented | Reads JSONL from `LLMSCOPE_TRACE_PATH`; includes OOM diagnostics for CUDA traces; helper logic is tested. |
 | What-if KV estimator | Implemented and tested | Analytical estimate only; it does not quantize a model. |
 | OOM headroom estimator | Implemented and tested | Conservative estimate from observed KV growth, CUDA allocator usage, and explicit device capacity. |
 | OOM precision scenarios | Implemented and tested | Analytical estimate of how KV storage precision could affect current headroom and future KV growth. |
@@ -145,7 +146,9 @@ export LLMSCOPE_TRACE_PATH=examples/demo_trace.jsonl
 python -m streamlit run src/llmscope/dashboard/app.py
 ```
 
-It shows KV-cache growth over steps, latest per-layer K/V byte breakdown, latest memory attribution, and an analytical dtype what-if table.
+It shows KV-cache growth over steps, latest per-layer K/V byte breakdown, latest memory attribution, OOM KV-growth headroom estimates for traces with CUDA allocator telemetry, analytical KV precision headroom scenarios, and an analytical dtype what-if table.
+
+The bundled CPU demo does not contain CUDA allocator telemetry, so OOM estimates are unavailable for that demo. CPU traces remain valid for KV growth, per-layer analysis, memory attribution summaries, and analytical dtype what-if estimates.
 
 ![Layer memory analysis dashboard](assets/layer-memory-analysis.png)
 
@@ -195,7 +198,7 @@ python -m mypy src
 python -m pytest -q
 ```
 
-Current result: 134 tests pass, with 2 optional integration tests skipped, and 84% total coverage.
+Current result: 148 tests pass, with 2 optional integration tests skipped, and 83% total coverage.
 
 ## Current Limitations
 
