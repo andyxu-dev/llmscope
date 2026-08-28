@@ -150,6 +150,19 @@ It shows KV-cache growth over steps, latest per-layer K/V byte breakdown, latest
 
 The bundled CPU demo does not contain CUDA allocator telemetry, so OOM estimates are unavailable for that demo. CPU traces remain valid for KV growth, per-layer analysis, memory attribution summaries, and analytical dtype what-if estimates.
 
+For demonstrating the OOM dashboard sections without a GPU, the repository also
+includes `examples/synthetic_cuda_trace.jsonl`. This file contains synthetic
+demonstration data. It was not captured from a real GPU run.
+
+```bash
+.venv/bin/python examples/generate_synthetic_cuda_trace.py
+export LLMSCOPE_TRACE_PATH=examples/synthetic_cuda_trace.jsonl
+.venv/bin/python -m streamlit run src/llmscope/dashboard/app.py
+```
+
+For the documented synthetic example, use GPU capacity assumption `24 GiB` and
+safety margin `1 GiB` in the dashboard.
+
 ![Layer memory analysis dashboard](assets/layer-memory-analysis.png)
 
 Layer and memory analysis from the same tiny GPT-2 CPU demo. The dtype what-if table is an analytical byte estimate for alternative KV-cache dtypes, not actual quantized inference.
@@ -198,7 +211,7 @@ python -m mypy src
 python -m pytest -q
 ```
 
-Current result: 148 tests pass, with 2 optional integration tests skipped, and 83% total coverage.
+Current result: 163 tests pass, with 2 optional integration tests skipped, and 83% total coverage.
 
 ## Current Limitations
 
