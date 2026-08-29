@@ -66,6 +66,18 @@ This is not a traditional frontend/backend web app. The main system is a Python 
 | CLI | Minimal | Installed `llmscope version` works; `serve` and `instrument` exit without behavior. |
 | Attention-weight capture | Not implemented | The config flag exists, but no capture path is implemented. |
 
+### OOM Headroom & KV Precision Scenarios
+
+The dashboard can estimate remaining KV-growth headroom and compare analytical KV precision scenarios.
+
+> **Synthetic CUDA OOM demo:** The allocator telemetry shown below is deterministic demonstration data and was **not captured from a real GPU run**.
+
+![Synthetic CUDA OOM dashboard](assets/oom-dashboard-synthetic.png)
+
+With a 24 GiB capacity assumption and a 1 GiB safety margin, this synthetic example estimates a maximum sequence length of **16,384** tokens at **FP16**, compared with **32,768** for **INT8** and **65,536** for theoretical **INT4** KV storage.
+
+This screenshot demonstrates the dashboard UI only. The OOM results are analytical estimates, not guaranteed predictions.
+
 ## Example Workflow
 
 ```python
